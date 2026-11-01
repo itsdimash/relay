@@ -1,6 +1,7 @@
 /** Notch panel: polls the local engine for the active task and shows it, with music, notes, files to deliver and the agent office. */
 import { createRoom } from './js/notch-room.js';
 import { limitRow } from './js/limits.js';
+import { createDesktopSessions } from './js/desktop-sessions.js';
 import { createCollaboration } from './js/notch-collaboration.js';
 import { createActivity } from './js/notch-activity.js';
 import { createMusicFx, STYLES, DEFAULT_STYLE, isStyle } from './js/notch-music-fx.js';
@@ -344,18 +345,50 @@ function notifyNative(run) {
   tell({ type: 'attention', keep: needsYou });
 }
 
-// Usage left for each tool, shown in the Office. Rebuilt only when the numbers change.
+// The Office defaults to 5 hours. Only the selected window controls its bar and colour.
 let limitsKey = '';
+let officeLimitWindow = 'session';
+let latestLimits = null;
+try { if (localStorage.getItem('relay.officeLimitWindow') === 'week') officeLimitWindow = 'week'; } catch (_) {}
 function renderLimits(limits) {
   if (!limits) return;
+  latestLimits = limits;
   const { now, ...readings } = limits;
-  const key = JSON.stringify(readings);
+  const key = JSON.stringify([officeLimitWindow, readings, Math.floor(now / 60)]);
   if (key === limitsKey) return;
   limitsKey = key;
+  const controls = document.createElement('div');
+  controls.className = 'limit-period';
+  controls.setAttribute('role', 'group');
+  controls.setAttribute('aria-label', 'Usage period');
+  const label = document.createElement('span');
+  label.textContent = 'Limits';
+  controls.append(label);
+  for (const [period, text] of [['session', '5h'], ['week', 'Weekly']]) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.textContent = text;
+    button.setAttribute('aria-pressed', String(officeLimitWindow === period));
+    button.addEventListener('click', () => {
+      officeLimitWindow = period;
+      try { localStorage.setItem('relay.officeLimitWindow', period); } catch (_) {}
+      renderLimits(latestLimits);
+    });
+    controls.append(button);
+  }
+  const empty = officeLimitWindow === 'session' ? 'no 5h reading' : 'no weekly reading';
   $('limits').replaceChildren(
-    limitRow(document, 'Claude', readings.claude, now, 'no reading yet'),
-    limitRow(document, 'Codex', readings.codex, now, 'no reading')
+    controls,
+    limitRow(document, 'Claude', readings.claude, now, empty, officeLimitWindow),
+    limitRow(document, 'Codex', readings.codex, now, empty, officeLimitWindow)
   );
+  if (!readings.claude || readings.claude.stale) {
+    const notice = document.createElement('div'); notice.className = 'limit-notice';
+    const message = document.createElement('span');
+    message.textContent = "Claude usage is refreshing or unavailable. Open Claude to check.";
+    const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open Claude';
+    open.addEventListener('click', () => tell({ type: 'open-provider', provider: 'claude' }));
+    notice.append(message, open); $('limits').append(notice);
+  }
 }
 
 // Banners that drop in from the notch. Music has its own animations and is not announced here.
@@ -505,6 +538,37 @@ function announce(run) {
   else if (run.status === 'failed') toast('failed', 'Stopped with an error', brief(run.summary) || 'Open Relay to see what happened.');
 }
 
+const desktopOffice = createDesktopSessions($('desktopOffice'), {
+  post, changed: () => poll(),
+  open: provider => tell({ type: 'open-provider', provider }),
+  attention: session => {
+    toast('approve', `${session.provider === 'codex' ? 'Codex' : 'Claude Code'} needs you`, session.title);
+    tell({ type: 'expand', view: 'office' });
+  },
+  selected: (provider, session) => {
+    $('panel').toggleAttribute('data-desktop', provider !== 'team');
+    if (provider === 'team') {
+      for (const el of document.querySelectorAll('[data-room-role]')) {
+        const role = el.dataset.roomRole;
+        el.replaceChildren(document.createElement('i'), role[0].toUpperCase() + role.slice(1)); el.disabled = false; el.setAttribute('aria-label', 'Inspect ' + role[0].toUpperCase() + role.slice(1));
+      }
+      render(current); return;
+    }
+    const role = provider === 'codex' ? 'observer' : 'builder';
+    const working = session?.status === 'working';
+    const waiting = ['needs_approval', 'needs_attention'].includes(session?.status);
+    $('panel').toggleAttribute('data-working', working);
+    $('panel').toggleAttribute('data-attention', waiting);
+    $('panel').dataset.actor = waiting ? 'you' : working ? role : 'idle';
+    room.setScene({ id: session?.id || 'desktop-idle', actor: waiting ? 'you' : working ? role : null, attentionRole: role,
+      terminal: session?.status === 'finished' ? 'done' : null });
+    for (const el of document.querySelectorAll('[data-room-role]')) {
+      const label = el.dataset.roomRole === 'observer' ? 'Codex' : el.dataset.roomRole === 'builder' ? 'Claude Code' : 'Relay';
+      el.replaceChildren(document.createElement('i'), label); el.disabled = true; el.setAttribute('aria-label', label);
+    }
+    updateGlow();
+  },
+});
 async function poll() {
   try {
     const data = await fetch('/api/notch', { cache: 'no-store' }).then(r => r.json());
@@ -514,6 +578,7 @@ async function poll() {
     if (JSON.stringify(current) !== before) render(current);
     announce(current);
     renderLimits(data.limits);
+    desktopOffice.update(data.desktop, current);
     batteryWatcher.update(data.battery);
     reminderWatcher.update(data.reminders);
     activity.update(data.queue, current);
@@ -567,12 +632,13 @@ function fallbackView() {
   return ['notes', 'music', 'deliver', 'task'].find(shown) || 'task';
 }
 
-function setView(next, { focus = true } = {}) {
+function setView(next, { focus = true, autoOffice = false } = {}) {
   if (next === 'notes' && current?.plan) next = 'task'; // a waiting plan always comes first
   if (!VIEWS.includes(next) || !shown(next) || (next === 'office' && mode !== 'full')) next = fallbackView();
   const before = view;
   view = next;
   $('panel').dataset.view = view;
+  if (view === 'office' && (before !== 'office' || autoOffice)) desktopOffice.activate();
   fx.setScene({ mode, view });
   if (view !== 'music') setFxPicker(false);
   if (view === 'office' && !document.hidden) room.start();
@@ -1842,7 +1908,7 @@ window.relayPanelMode = info => {
   if (mode === 'pill') return;
   let target = typeof info.view === 'string' ? info.view : chosenView;
   if (current?.plan && (target === 'notes' || target === 'music')) target = 'task';
-  setView(target, { focus: false });
+  setView(target, { focus: false, autoOffice: target === 'office' });
   translator.refit(); // the app forgets what height was asked for when the shape changes
   syncHold(); // a card that is still open keeps the panel open
   // A plan that needs an answer does not fit in the small panel.
@@ -1882,6 +1948,7 @@ loadNotes();
 loadDeliver();
 poll();
 setInterval(poll, 1000);
+if (new URLSearchParams(location.search).get('view') === 'office') window.relayPanelMode({ mode: 'full', view: 'office' });
 setInterval(tickTimer, 1000);
 setInterval(tickProgress, 500);
 // A file may have been moved or deleted since; with Auto-catch or a time limit on, the shelf changes by itself on any tab.

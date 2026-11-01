@@ -76,6 +76,7 @@ def main(app):
         app.enforce_retention()
         server = ThreadingHTTPServer(('127.0.0.1', args.port), app.Handler)
         # Closing the server must never wait for a request thread; a stuck connection once kept the engine alive after quit.
+        app.desktop.bind(f'http://127.0.0.1:{server.server_port}')
         server.daemon_threads = True
         server.block_on_close = False
     except OSError as error:
@@ -106,6 +107,7 @@ def main(app):
                 active.stop_event.set()
                 active.resume_event.set()
         try:
+            app.desktop.shutdown()
             if active and not active.finished.is_set():
                 active.stop_process()
                 if not active.finished.wait(60):

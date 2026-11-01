@@ -7,6 +7,7 @@ Both only exist on subscription sign-ins, and a reading can be old, so each carr
 import functools
 import json
 import os
+import re
 import subprocess
 import tempfile
 import threading
@@ -16,6 +17,7 @@ CODEX_REFRESH_SECONDS = 90
 CODEX_RETRY_SECONDS = 600
 CLAUDE_REFRESH_SECONDS = 900   # Claude only reports usage when asked a question, so a reading is taken at most this often
 CLAUDE_RETRY_SECONDS = 1800
+CLAUDE_FRESH_SECONDS = 120
 SESSION_MINUTES = 720  # windows up to 12 hours are the "session" window, longer ones the weekly one
 
 
@@ -168,14 +170,65 @@ def read_claude_limits(binary, timeout=60, run=subprocess.run):
     return found
 
 
+def claude_usage_status_reading(report):
+    """Accept only Claude's built-in /usage report, never a model-authored answer."""
+    if not isinstance(report, dict) or report.get('local_command') != 'usage' or report.get('is_error'):
+        return None
+    if report.get('num_turns') != 0 or report.get('total_cost_usd') != 0:
+        return None
+    text = report.get('result')
+    if not isinstance(text, str):
+        return None
+    windows = {}
+    labels = [('session', r'Current session'), ('week', r'Current week \(all models\)')]
+    for name, label in labels:
+        match = re.search(r'^' + label + r':\s*(\d+(?:\.\d+)?)%\s+used(?:\s*[·|]\s*resets\s+([^\r\n]+))?\s*$', text, re.MULTILINE)
+        if not match:
+            continue
+        used = float(match.group(1))
+        if not 0 <= used <= 100:
+            continue
+        windows[name] = {'left': round(100 - used), 'resets_at': None}
+        if match.group(2):
+            windows[name]['reset_label'] = match.group(2).strip()[:120]
+    return windows or None
+
+
+def read_claude_usage_status(binary, timeout=15, run=subprocess.run):
+    """The official local /usage command performs zero model turns and reads plan limits.
+
+    Keep provider authentication inside Claude. No credentials, user prompts, project
+    tools, settings, MCP servers, or conversational history are read by Relay.
+    Unsupported versions and failed/unverified reports return no current reading.
+    """
+    if os.environ.get('RELAY_NO_CLAUDE_USAGE_POLL'):
+        return None
+    environment = os.environ.copy()
+    environment.pop('CLAUDECODE', None)
+    environment['LANG'] = 'en_US.UTF-8'
+    environment['LC_ALL'] = 'en_US.UTF-8'
+    args = [binary, '-p', '/usage', '--output-format', 'json', '--restricted',
+            '--setting-sources', '', '--tools', '', '--permission-mode', 'dontAsk',
+            '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}']
+    try:
+        with tempfile.TemporaryDirectory(prefix='relay-usage-status-') as folder:
+            result = run(args, cwd=folder, env=environment, capture_output=True, text=True, timeout=timeout)
+        if result.returncode != 0:
+            return None
+        return claude_usage_status_reading(json.loads(result.stdout))
+    except (OSError, subprocess.SubprocessError, ValueError, TypeError):
+        return None
+
+
 class Limits:
     """The latest readings for both tools, kept in memory and in a small file so they survive a restart."""
 
-    def __init__(self, path, executable, clock=time.time, read_codex=read_codex_limits, read_claude=read_claude_limits, start=None):
+    def __init__(self, path, executable, clock=time.time, read_codex=read_codex_limits, read_claude=read_claude_limits, start=None, reader_sources=None):
         self.path = path
         self.executable = executable
         self.clock = clock
         self.readers = {'claude': read_claude, 'codex': read_codex}
+        self.reader_sources = reader_sources or {}
         self.delays = {'claude': (CLAUDE_REFRESH_SECONDS, CLAUDE_RETRY_SECONDS), 'codex': (CODEX_REFRESH_SECONDS, CODEX_RETRY_SECONDS)}
         self.start = start or (lambda job: threading.Thread(target=job, name='limits', daemon=True).start())
         self.lock = threading.Lock()
@@ -199,16 +252,16 @@ class Limits:
         except OSError:
             pass
 
-    def _store(self, tool, windows):
+    def _store(self, tool, windows, source=None):
         with self.lock:
-            self._load()[tool] = {**windows, 'seen_at': int(self.clock())}
+            self._load()[tool] = {**windows, 'seen_at': int(self.clock()), **({'source': source} if source else {})}
             self._save()
 
     def record_claude(self, event):
         """A reading that arrived with one of Relay's own Claude tasks."""
         windows = claude_reading(event)
         if windows:
-            self._store('claude', windows)
+            self._store('claude', windows, source='claude-code-stream')
 
     def refresh(self, tool):
         binary = self.executable(tool)
@@ -218,7 +271,7 @@ class Limits:
             self.busy.discard(tool)
             self.next[tool] = self.clock() + (refresh_after if windows else retry_after)
         if windows:
-            self._store(tool, windows)
+            self._store(tool, windows, source=self.reader_sources.get(tool))
 
     def _maybe_refresh(self, tool):
         with self.lock:
@@ -227,7 +280,7 @@ class Limits:
                 # A reading that arrived with a task is as good as one asked for.
                 seen = (self._load().get('claude') or {}).get('seen_at')
                 if isinstance(seen, (int, float)):
-                    due = max(due, seen + CLAUDE_REFRESH_SECONDS)
+                    due = max(due, seen + self.delays['claude'][0])
             if tool in self.busy or self.clock() < due:
                 return
             self.busy.add(tool)
@@ -247,13 +300,18 @@ class Limits:
                 result[tool] = None
                 continue
             item = {'seen_at': reading.get('seen_at')}
+            if reading.get('source'):
+                item['source'] = reading['source']
+            if tool == 'claude':
+                seen = reading.get('seen_at')
+                item['stale'] = not isinstance(seen, (int, float)) or not 0 <= now - seen <= CLAUDE_FRESH_SECONDS
             for name in ('session', 'week'):
                 window = reading.get(name)
                 if not isinstance(window, dict):
                     continue
-                # A window that has reset since the reading is full again.
+                # An expired reading cannot tell us whether another app has already used the new window.
                 if isinstance(window.get('resets_at'), int) and window['resets_at'] <= now:
-                    window = {'left': 100, 'resets_at': None}
+                    continue
                 item[name] = window
             result[tool] = item
         return result

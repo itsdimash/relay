@@ -83,12 +83,15 @@ class Handler(BaseHTTPRequestHandler):
                 data = notch.snapshot(infos, load=self.app.run_info)
             data['token'] = self.app.TOKEN
             data['queue'] = self.app.queue_snapshot()
+            data['desktop'] = self.app.desktop.snapshot()
             data['limits'] = self.app.limits.snapshot()
             data['battery'] = battery.snapshot()
             data['reminders'] = self.app.due_reminders()
             return self.respond(data)
         if path == '/api/storage':
             return self.respond(self.app.storage_usage())
+        if path == '/api/desktop':
+            return self.respond(self.app.desktop.snapshot())
         if path == '/api/limits':
             return self.respond(self.app.limits.snapshot())
         if path == '/api/queue':
@@ -120,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == '/api/connections':
             return self.respond(self.app.tool_status())
         files = {'/review.js': ('review.js', 'text/javascript; charset=utf-8'), '/review.css': ('review.css', 'text/css; charset=utf-8'), '/markdown.js': ('markdown.js', 'text/javascript; charset=utf-8'), '/report.css': ('report.css', 'text/css; charset=utf-8'), '/sidebar.css': ('sidebar.css', 'text/css; charset=utf-8'), '/relay.svg': ('relay.svg', 'image/svg+xml'), '/favicon.ico': ('favicon.ico', 'image/x-icon'), '/favicon.png': ('favicon.png', 'image/png'), '/apple-touch-icon.png': ('apple-touch-icon.png', 'image/png'), '/': ('index.html', 'text/html; charset=utf-8'), '/app.js': ('app.js', 'text/javascript; charset=utf-8'), '/style.css': ('style.css', 'text/css; charset=utf-8')}
-        modules = ('recovery', 'clarification', 'api', 'attachments', 'constants', 'conversation', 'dom', 'findings', 'history', 'notifications', 'projects', 'state', 'tasks', 'task-queue', 'teams', 'updates', 'storage', 'notch-room', 'notch-collaboration', 'notch-activity', 'notch-music-fx', 'notch-battery', 'notch-translate', 'notch-reminders', 'notch-voice', 'notch-commands', 'notch-speech', 'limits', 'appearance')
+        modules = ('recovery', 'clarification', 'api', 'attachments', 'constants', 'conversation', 'dom', 'findings', 'history', 'notifications', 'projects', 'state', 'tasks', 'task-queue', 'teams', 'updates', 'storage', 'notch-room', 'notch-collaboration', 'notch-activity', 'notch-music-fx', 'notch-battery', 'notch-translate', 'notch-reminders', 'notch-voice', 'notch-commands', 'notch-speech', 'limits', 'desktop-sessions', 'appearance')
         files.update({f'/js/{name}.js': (f'js/{name}.js', 'text/javascript; charset=utf-8') for name in modules})
         files['/recovery.css'] = ('recovery.css', 'text/css; charset=utf-8')
         files['/clarification.css'] = ('clarification.css', 'text/css; charset=utf-8')
@@ -151,6 +154,21 @@ class Handler(BaseHTTPRequestHandler):
         return self.respond({'error': 'Not found'}, 404)
 
     def do_POST(self):
+        if urlparse(self.path).path.startswith('/api/desktop/event/'):
+            if not self.valid_host() or self.headers.get('Origin'):
+                return self.respond({'error': 'Invalid desktop hook origin.'}, 403)
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                if not 0 < length <= 512000:
+                    raise ValueError('Invalid desktop event size.')
+                payload = json.loads(self.rfile.read(length))
+                if not isinstance(payload, dict):
+                    raise ValueError('Invalid desktop event.')
+                provider = urlparse(self.path).path.rsplit('/', 1)[-1]
+                result = self.app.desktop.receive(provider, self.headers.get('X-Relay-Desktop-Token', ''), payload)
+                return self.respond(result)
+            except (ValueError, TypeError, OSError) as error:
+                return self.respond({'error': str(error)}, 400)
         if not self.valid_host() or self.headers.get('X-Relay-Token') != self.app.TOKEN:
             return self.respond({'error': 'Reload the dashboard to reconnect.'}, 403)
         origin = self.headers.get('Origin')
@@ -166,6 +184,12 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(payload, dict):
                 raise ValueError('Request body must be a JSON object.')
             path = urlparse(self.path).path
+            if path == '/api/desktop/connect':
+                # Use the current listener; hooks read their URL/token from Relay-owned private files.
+                self.app.desktop.bind(f'http://127.0.0.1:{self.server.server_port}')
+                return self.respond(self.app.desktop.connect(payload.get('provider'), payload.get('enabled')))
+            if path == '/api/desktop/decide':
+                return self.respond(self.app.desktop.decide(payload.get('request_id'), payload.get('decision')))
             if path == '/api/queue/add':
                 return self.respond(self.app.add_queued_task(payload), 201)
             if path == '/api/queue/remove':

@@ -547,3 +547,27 @@ A distribution license has not been selected, and no `LICENSE` file is included 
 - [Codex image inputs](https://learn.chatgpt.com/docs/image-inputs?surface=cli)
 - [Claude Code programmatic usage](https://code.claude.com/docs/en/headless)
 - [Claude image input through streaming messages](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode)
+
+## Companion for the original Codex and Claude desktop apps
+
+Open the full notch panel (double-tap right Command), choose **Office**, then **Codex app** or **Claude app**. Continue giving tasks in the original apps. Relay discovers their local sessions, shows the latest observed activity and account usage readings, and animates the Office. There is no task form or agent launcher in these views. Relay never starts, resumes, interrupts, or sends a prompt to an external app session.
+
+Local session discovery works immediately on supported macOS app versions. It reads Codex's local session index and bounded transcript suffixes, plus metadata for sessions in Claude Desktop's **Code** tab. Ordinary Claude Chat, Cowork, cloud-only sessions, other computers, and unsupported metadata versions are outside this first integration. Old or incomplete signals show **Last observed**, never a fabricated running state. These app-owned file formats may change.
+
+For live activity and supported approval buttons, click **Enable live connection** in each app view. Relay adds its lifecycle hooks to that provider's user settings, preserving other settings and hooks and keeping an exact backup in Relay's data folder. Start a new original-app session to load the connection. Codex requires normal review/trust of the exact Relay hooks with `/hooks`; Relay does not bypass that review. **Disconnect live updates** removes only Relay's own hook entries. Provider-managed policies still apply.
+
+While an original app's supported permission hook is waiting, Relay shows **Approve once**, **Reject**, and **Answer in app**. Decisions go back to that exact pending hook. **Answer in app**, timeout (two minutes), Relay shutdown, or loss of the connection returns no decision, leaving approval to the original app's normal flow. Requests cleared by a matching tool result or turn end cannot be approved afterward. Unsupported prompts, including some Claude network approvals, stay in the original app; a notification hook can direct you there.
+
+Usage comes from observed Codex session rate-limit events and Claude's built-in read-only JSON `/usage` report, with dated desktop history as a fallback. This makes no model requests. Usage is account-wide rather than task progress; missing values remain unknown. Claude readings older than two minutes are shown as **Out of date** rather than current percentages. Provider-reported reset labels are retained. An expired window needs a new reading rather than being assumed 100% available.
+
+Session information and pending decisions stay on this Mac. Relay keeps no copied external transcripts or prompt history. The localhost bridge uses a private per-run token stored in Relay-owned files; credentials and hook tokens are never returned to the Office UI. Original app session files and databases are opened read-only.
+
+The Office usage meters default to **5h**. Choose **Weekly** beside **Limits** to display the weekly window instead. The percentage, meter colour, and reset tooltip all use the selected period; Relay remembers the choice. A missing 5-hour reading never falls back silently to weekly.
+
+The Office app-session list only includes tasks with activity in the last **20 minutes**. This rolling window uses the latest app or live-hook activity, and old sessions disappear automatically, including completed tasks. If nothing is recent, the view says there has been no activity in the last 20 minutes.
+
+When Office opens, it automatically selects the highest-priority active work: **Relay Team → Claude Code → Codex**. Waiting approvals count as active work; a paused Relay team does not. Automatic selection follows activity changes until you manually choose an app or session. Your manual choice stays in place while Office is open, and the priority is applied again next time you open it.
+
+Claude's native usage-history cache can stop updating while Cowork keeps consuming quota. Relay refreshes through the built-in status command rather than depending on that paused cache. It retains observation time and source; restarting Relay or polling the same old cache never makes a stale reading fresh. The existing Claude CLI must support the JSON usage report and be signed into the intended subscription; unsupported versions and API-key-only accounts may have no plan-quota reading.
+
+Claude quota refresh now uses its official built-in `claude -p /usage --output-format json` report, once per minute. This is a local status command, not a model prompt: Relay accepts only `local_command: "usage"`, `num_turns: 0`, and `total_cost_usd: 0`. Claude manages its own sign-in; Relay does not read credentials. The command runs in an empty temporary folder with project tools/settings/MCP servers disabled. All-model weekly and five-hour **used** percentages are converted once to **left** percentages, so 44%/74% used becomes 56%/26% left. The local desktop history is only a dated fallback. Failures back off for two minutes; stale readings are not shown as current. CLI versions without the built-in JSON usage report produce an unavailable reading, never a model-generated estimate.

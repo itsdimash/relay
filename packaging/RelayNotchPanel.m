@@ -397,6 +397,15 @@ static NSColor *DominantColor(NSString *dataURL) {
         if (run && [run[@"running"] boolValue] && ![run[@"paused"] boolValue]) {
             actor = [run[@"actor"] isKindOfClass:NSString.class] ? run[@"actor"] : @"relay";
         }
+        if (!actor && [parsed isKindOfClass:NSDictionary.class]) {
+            NSDictionary *desktop = [parsed[@"desktop"] isKindOfClass:NSDictionary.class] ? parsed[@"desktop"] : nil;
+            NSArray *sessions = [desktop[@"sessions"] isKindOfClass:NSArray.class] ? desktop[@"sessions"] : @[];
+            for (NSDictionary *session in sessions) {
+                NSString *status = session[@"status"];
+                if ([status isEqualToString:@"needs_approval"]) { actor = @"you"; break; }
+                if ([status isEqualToString:@"working"]) actor = @"builder";
+            }
+        }
         dispatch_async(dispatch_get_main_queue(), ^{
             RelayNotchPanel *strongSelf = weakSelf;
             if (!strongSelf || !strongSelf.enabled) return;
@@ -1226,6 +1235,11 @@ static NSColor *DominantColor(NSString *dataURL) {
             [self.delegate notchPanelRequestsOpenRelay];
         }
         [self hideAnimated:YES];
+    } else if ([type isEqualToString:@"open-provider"]) {
+        NSString *provider = body[@"provider"];
+        NSString *bundleID = [provider isEqualToString:@"codex"] ? @"com.openai.codex" : [provider isEqualToString:@"claude"] ? @"com.anthropic.claudefordesktop" : nil;
+        NSURL *url = bundleID ? [NSWorkspace.sharedWorkspace URLForApplicationWithBundleIdentifier:bundleID] : nil;
+        if (url) [NSWorkspace.sharedWorkspace openApplicationAtURL:url configuration:NSWorkspaceOpenConfiguration.configuration completionHandler:nil];
     } else if ([type isEqualToString:@"quit"]) {
         // Quit goes through the app, which waits for the engine to save a running task before it exits.
         [self hideAnimated:YES];

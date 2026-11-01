@@ -657,3 +657,56 @@ kbd { min-width: 18px; padding: 0 5px; border-radius: 5px; border: 1px solid rgb
   .composer-live i { height: 10px; }
   .speak-bars i { height: 8px; }
 }
+
+/* Original-app companion: status and human decisions, without a task composer. */
+.desktop-office { display: none; min-width: 0; }
+.panel[data-view="office"] .desktop-office { display: block; }
+.panel[data-view="office"][data-desktop] .info > :not(.desktop-office):not(.limits) { display: none; }
+.panel[data-view="office"][data-desktop] .desktop-office { flex: 1 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-right: 3px; }
+.desktop-modes { position: sticky; top: 0; z-index: 2; display: flex; gap: 3px; margin-bottom: 9px; padding-block: 2px; background: #000; }
+.desktop-modes button { flex: 1; padding: 7px 2px; border: 0; border-radius: 5px; color: #aaa; background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
+.desktop-modes button[aria-pressed="true"] { background: #292929; color: #fff; }
+.desktop-body { display: flex; flex-direction: column; gap: 7px; }
+.desktop-body[hidden] { display: none; }
+.desktop-title { font-size: 13px; overflow-wrap: anywhere; }
+.desktop-toolbar { display: flex; justify-content: flex-end; }
+.desktop-toolbar .btn { font-size: 11px; padding: 4px 8px; }
+.desktop-meta, .desktop-help { font-size: 11px; line-height: 1.5; color: #aaa; margin: 0; overflow-wrap: anywhere; }
+.desktop-session-status { display: flex; align-items: baseline; justify-content: space-between; font-size: 12px; gap: 8px; }
+.desktop-session-status[data-state="working"] strong { color: var(--brand); }
+.desktop-session-status[data-state="needs_approval"] strong { color: var(--amber); }
+.desktop-activity { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
+.desktop-body select { width: 100%; min-width: 0; border: 1px solid #444; border-radius: 5px; background: #202020; color: #eee; padding: 7px; font: inherit; font-size: 12px; }
+.desktop-request { border: 1px solid #786139; border-radius: 6px; padding: 8px; font-size: 12px; }
+.desktop-request p { margin: 5px 0; }
+.desktop-request pre { margin: 6px 0; max-height: 100px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; user-select: text; }
+.desktop-request .btn { margin: 4px 4px 0 0; padding-inline: 8px; font-size: 11px; }
+.desktop-setup { padding-top: 8px; font-size: 11px; }
+.desktop-setup .btn { margin-top: 6px; font-size: 11px; }
+.desktop-attention { width: 100%; margin-bottom: 9px; border: 0; border-radius: 5px; background: #493b24; color: #ffdc9d; padding: 8px; font: inherit; font-size: 12px; }
+.desktop-body button:focus-visible, .desktop-modes button:focus-visible, .desktop-body select:focus-visible { outline: 2px solid #9abfc5; outline-offset: 2px; }
+.panel[data-view="office"][data-desktop] .limits { margin-top: 10px; }
+.panel[data-desktop] .room-hit-targets { display: none; }
+@media (max-width: 620px) {
+  .panel[data-view="office"] .stage { grid-template-columns: minmax(0, 1fr); }
+  .panel[data-view="office"] .room { display: none; }
+  .panel[data-view="office"] .info { padding-left: 0; margin-left: 0; }
+}
+
+.desktop-title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+
+.desktop-session-status > .desktop-meta { min-width: 0; max-width: 75px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-body[data-pending] > .desktop-title, .desktop-body[data-pending] > .desktop-activity, .desktop-body[data-pending] > .desktop-setup { display: none; }
+
+/* The selected usage period applies to both provider rows and their meters. */
+.limit-period { display: flex; align-items: center; gap: 4px; font-size: 11px; }
+.limit-period > span { margin-right: auto; color: var(--muted); }
+.limit-period button { padding: 2px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; }
+.limit-period button[aria-pressed="true"] { background: #292929; color: var(--text); }
+.limit-period button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.limit[data-level="stale"] .limit-bar { background: rgba(255,255,255,.08); }
+.limit[data-level="stale"] .limit-text { color: var(--amber); }
+.limit-notice { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.limit-notice span { flex: 1; }
+.limit-notice button { flex: none; padding: 3px 6px; border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text); font: inherit; }

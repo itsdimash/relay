@@ -148,19 +148,33 @@ class LimitsStoreTests(unittest.TestCase):
             self.assertEqual(shot['claude']['week']['left'], 9)
             self.assertEqual(shot['claude']['seen_at'], 1792890000)
 
+    def test_claude_percentages_expire_without_retimestamping_the_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = self.make(folder, now=1000)
+            store._store('claude', {'session': {'left': 74, 'resets_at': 10000},
+                                    'week': {'left': 29, 'resets_at': 20000}})
+            self.now = 1120
+            self.assertFalse(store.snapshot()['claude']['stale'])
+            self.now = 1121
+            self.assertTrue(store.snapshot()['claude']['stale'])
+            self.assertEqual(store.snapshot()['claude']['seen_at'], 1000)
+            restored = self.make(folder, now=2873)
+            self.assertTrue(restored.snapshot()['claude']['stale'])
+            self.assertEqual(restored.snapshot()['claude']['seen_at'], 1000)
+
     def test_no_reading_yet_is_none(self):
         with tempfile.TemporaryDirectory() as folder:
             shot = self.make(folder).snapshot()
             self.assertIsNone(shot['claude'])
             self.assertIsNone(shot['codex'])
 
-    def test_a_window_that_has_reset_is_full_again(self):
+    def test_a_window_that_has_reset_needs_a_fresh_reading(self):
         with tempfile.TemporaryDirectory() as folder:
             store = self.make(folder, now=1792890000)
             store.record_claude(CLAUDE_EVENT)
             self.now = 1792894801  # one second after the 5-hour window reset
             shot = store.snapshot()
-            self.assertEqual(shot['claude']['session'], {'left': 100, 'resets_at': None})
+            self.assertNotIn('session', shot['claude'])
             self.assertEqual(shot['claude']['week']['left'], 9)
 
     def test_asking_never_waits_and_each_tool_refreshes_in_the_background(self):

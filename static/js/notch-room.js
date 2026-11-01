@@ -138,7 +138,7 @@ export function createRoom(canvas, { reducedMotion = false, now = () => performa
     }
     scene = { actor: next.actor || null, terminal: next.terminal || null, auto: !!next.auto, steps: Array.isArray(next.steps) ? next.steps : [] };
     if (ROLES.includes(scene.actor)) holder = scene.actor;
-    else if (scene.actor === 'you') holder = 'observer';
+    else if (scene.actor === 'you') holder = ROLES.includes(next.attentionRole) ? next.attentionRole : 'observer';
     if (scene.terminal === 'done' && previousTerminal !== 'done' && !reducedMotion) celebrate();
     if (scene.terminal === 'failed' && previousTerminal !== 'failed' && !reducedMotion) sparks(GATE_X, 60, 14, RED);
     previousTerminal = scene.terminal;

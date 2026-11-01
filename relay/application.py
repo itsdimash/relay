@@ -4,7 +4,7 @@ import secrets
 import threading
 
 from . import attachments, deliver, git_ops, history, lifecycle, limits, notes, notify, providers, recovery, registry, reports, retention, translate
-from . import contracts, task_queue
+from . import contracts, task_queue, desktop
 from .http import Handler
 from .updater import Updater, RESTART_STATUS
 from .workflow import Run
@@ -28,9 +28,12 @@ class Application:
         self.SHUTTING_DOWN = threading.Event()
         self.updater = Updater()
         # How much of each tool's usage limits is left; reads nothing until the first screen asks.
-        self.limits = limits.Limits(self.DATA / 'limits.json', providers.executable)
+        self.limits = limits.Limits(self.DATA / 'limits.json', providers.executable, read_codex=lambda _: None, read_claude=limits.read_claude_usage_status,
+                                    reader_sources={'claude': 'claude-usage-command'})
+        self.limits.delays['claude'] = (60, 120)
         # Puts finished downloads on the Deliver shelf when that is switched on; looks at nothing until watching starts.
         self.catcher = deliver.Catcher(self)
+        self.desktop = desktop.DesktopCompanion(self)
 
         class TaskRun(Run):
             app = self
